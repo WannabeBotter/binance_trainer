@@ -22,7 +22,7 @@ import gc
 from target_symbols import target_symbols
 from joblib_util import tqdm_joblib
 
-from pygui_util import pygui_log
+from pygui_util import pygui_log, pygui_label_id_map
 import dearpygui.dearpygui as dpg
 
 # BinanceのAPIエンドポイント
@@ -69,10 +69,11 @@ def download_orderbook_targz(symbol: str = None, startdate: datetime.datetime = 
     _sign = sign(_params)
     _url = f"{S_URL_V1}/futuresHistDataId?{urlencode(_sign[0])}&{urlencode(_sign[1])}"
 
-    _r = requests.post(_url, headers = {"X-MBX-APIKEY": api_key}, verify = True, timeout = 30)
+    pygui_log(f"HTTP POST : {_url}")
+    _r = requests.post(_url, headers = {"X-MBX-APIKEY": api_key}, verify = True, timeout = 60)
+    
     if _r.status_code != requests.codes.ok:
-        pygui_log(f"From response.post({_url}), received HTTP status {_r.status_code}.")
-        pygui_log(_r.json())
+        pygui_log(f"HTTP POST status : {_r.status_code}.")
         raise Exception
     
     _downloadid = _r.json()["id"]
@@ -87,13 +88,14 @@ def download_orderbook_targz(symbol: str = None, startdate: datetime.datetime = 
         _r = requests.get(_url, headers={"X-MBX-APIKEY": api_key}, timeout=30, verify=True)
 
         if _r.status_code != requests.codes.ok:
-            pygui_log(f"From response.post({_url}), received HTTP status {_r.status_code}.")
+            pygui_log(f"HTTP GET status : {_r.status_code}.")
             pygui_log(_r.json())
             raise Exception
+
         
         if "expirationTime" not in _r.json():
-            pygui_log(f"Download link isn't ready. Retry after 5 seconds.")
-            time.sleep(5)
+            pygui_log(f"Download link isn't ready. Retry after 10 seconds.")
+            time.sleep(10)
             continue
         else:
             pygui_log("Received a download link.")
@@ -113,7 +115,6 @@ def download_orderbook_targz(symbol: str = None, startdate: datetime.datetime = 
         # Process downloaded tar.gz file
         with tarfile.open(fileobj = _fileobj, mode = "r:gz") as _tarfile:
             _filenames = _tarfile.getnames()
-            print(_filenames)
    
             # Process .tar.gz files in downloaded tar.gz file
             for _filename in _filenames:
@@ -127,7 +128,7 @@ def download_orderbook_targz(symbol: str = None, startdate: datetime.datetime = 
                         _orderbook_df = pl.read_csv(BytesIO(_orderbook_tarfile.extractfile(_orderbook_filename).read()),
                             skip_rows = 1,
                             new_columns = ["symbol", "timestamp", "first_update_id", "last_update_id", "side", "update_type", "price", "qty", "pu"],
-                            dtypes = {"symbol": pl.String, "timestamp": pl.Int64, "first_update_id": pl.Int64, "last_update_id": pl.Int64, "side": pl.String, "price": pl.Float64, "qty": pl.Float64, "pu": pl.Int64})
+                            dtypes = {"symbol": pl.Utf8, "timestamp": pl.Int64, "first_update_id": pl.Int64, "last_update_id": pl.Int64, "side": pl.Utf8, "price": pl.Float64, "qty": pl.Float64, "pu": pl.Int64})
                         
                         if not os.path.exists(f"./data/"):
                             os.makedirs(f"./data/")
@@ -137,43 +138,29 @@ def download_orderbook_targz(symbol: str = None, startdate: datetime.datetime = 
                         del(_orderbook_df)
                         gc.collect()
     except Exception as e:
-        dpg.set_value("label_status", e)
+        pygui_log(e)
         raise e
 
     return
 
-# オーダーブックをダウンロードするスレッドを立ち上げる関数
-def download_orderbook(symbol: str = None, startdate: datetime.datetime = None) -> None:
-    assert symbol is not None
-    assert startdate is not None
-    
-    pygui_log(f"Download {symbol} orderbook data on {startdate}")
-
-    thread = threading.Thread(target = download_orderbook_targz, args = (symbol, startdate))
-    thread.start()
-    #with tqdm_joblib(total = len(symbols)):
-    #    r = Parallel(n_jobs = 4, timeout = 60*60*24)([delayed(download_orderbook_zip)(_symbol, _startdate, _enddate, _datadir) for _symbol in symbols])
-    return
-
 # 指定されたファイル名をもとに、.zipをダウンロードしてデータフレームを作り、pkl.gzとして保存する関数
 @retry(stop_max_attempt_number = 5, wait_fixed = 1000)
-def download_trades_zip(symbol: str = None, startdate: datetime.datetime = None) -> None:
+def download_trades_zip(symbol: str = None, target_date: datetime.datetime = None) -> None:
     assert symbol is not None
-    assert startdate is not None
+    assert target_date is not None
     
-    target_file_name = f"{symbol}-trades-{startdate.strftime('%Y-%m-%d')}.zip"
+    target_file_name = f"{symbol}-trades-{target_date.strftime('%Y-%m-%d')}.zip"
 
     _stem = Path(target_file_name).stem
     
     _url = f'https://data.binance.vision/data/futures/um/daily/trades/{symbol}/{target_file_name}'
-    print(_url)
-    
+    pygui_log(f"HTTP GET : {_url}")
     _r = requests.get(_url)
+    pygui_log(f"HTTP GET status : {_r.status_code}.")
+    
     if _r.status_code != requests.codes.ok:
-        pygui_log(f"From response.get({_url}), received HTTP status {_r.status_code}.")
         print(f"From response.get({_url}), received HTTP status {_r.status_code}.")
         time.sleep(1)
-
         raise Exception
     
     _csvzip = zipfile.ZipFile(BytesIO(_r.content))
@@ -202,14 +189,24 @@ def download_trades_zip(symbol: str = None, startdate: datetime.datetime = None)
     _df.write_parquet(f"./data/{_stem}.parquet")
     return
 
-def download_trades(symbol: str = None, startdate: datetime.datetime = None) -> None:
+def download_completion(thread_trades, thread_orderbook) -> None:
+    thread_trades.join()
+    thread_orderbook.join()
+    dpg.configure_item("button_download", enabled=True)
+
+def download_trades_orderbook(symbol: str = None, target_date: datetime.datetime = None) -> None:
     assert symbol is not None
-    assert startdate is not None
+    assert target_date is not None
     
-    pygui_log(f"Download {symbol} trade data on {startdate}")
+    pygui_log(f"Starting a download thread for {symbol} orderbook data on {target_date}.")
+    _thread_trades = threading.Thread(target = download_trades_zip, args = (symbol, target_date))
+    _thread_orderbook = threading.Thread(target = download_orderbook_targz, args = (symbol, target_date))
+    _thread_waiting = threading.Thread(target = download_completion, args = (_thread_trades, _thread_orderbook))
 
-    thread = threading.Thread(target = download_trades_zip, args = (symbol, startdate))
-    thread.start()
+    #with tqdm_joblib(total = len(symbols)):
+    #    r = Parallel(n_jobs = 4, timeout = 60*60*24)([delayed(download_orderbook_zip)(_symbol, _startdate, _enddate, _datadir) for _symbol in symbols])
 
-    return
+    _thread_trades.start()
+    _thread_orderbook.start()
+    _thread_waiting.start()
 

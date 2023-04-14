@@ -1,10 +1,15 @@
 from datetime import datetime
-import re
+import numpy as np
 import dearpygui.dearpygui as dpg
 
-global pygui_label_id_map
-pygui_label_id_map = {}
+# Orderbookのヒートマップ表示用のテクスチャ
+orderbook_heatmap_texture = np.zeros((160, 160, 4), dtype=np.float32)
 
+def get_orderbook_heatmap_texture():
+    global orderbook_heatmap_texture
+    return orderbook_heatmap_texture
+    
+# ログウィンドウにログ出力をする関数
 def pygui_log(text: str) -> None:
     _log_text = dpg.get_value("text_log")
     _log_text += f"{text}\n"
@@ -13,13 +18,13 @@ def pygui_log(text: str) -> None:
     _y_scroll_max = dpg.get_y_scroll_max("window_log")
     dpg.set_y_scroll("window_log", _y_scroll_max)
 
-from data_download import download_trades_orderbook
-from data_replay import load_trades_orderbook
+from data_download import download_trades_orderbook, load_dataframes_thread
+from data_replay import run_replay_thread
 
 # ダウンロードメニューを押したときのコールバック関数
 def download_menu_callback(sender, app_data, user_data):
     _show = dpg.get_item_configuration("window_download")["show"]
-    dpg.configure_item("window_download", show= not _show)
+    dpg.configure_item("window_download", show=True)
 
 # ダウンロードボタンを押した時のコールバック関数
 def download_button_callback(sender, app_data, user_data):
@@ -34,7 +39,7 @@ def download_button_callback(sender, app_data, user_data):
 # ロードメニューを押したときのコールバック関数
 def load_menu_callback(sender, app_data, user_data):
     _show = dpg.get_item_configuration("window_load")["show"]
-    dpg.configure_item("window_load", show= not _show)
+    dpg.configure_item("window_load", show=True)
 
 # ロードボタンを押した時のコールバック関数
 def load_button_callback(sender, app_data, user_data):
@@ -44,7 +49,13 @@ def load_button_callback(sender, app_data, user_data):
     _startdatetime = datetime.strptime(_startdate, "%Y-%m-%d")
 
     dpg.configure_item("button_load", enabled=False)
-    load_trades_orderbook(_symbol, _startdatetime)
+    load_dataframes_thread(_symbol, _startdatetime)
+
+# リプレイメニューを押したときのコールバック関数
+def replay_menu_callback(sender, app_data, user_data):
+    _show = dpg.get_item_configuration("window_replay")["show"]
+    dpg.configure_item("window_replay", show=True)
+    run_replay_thread()
 
 def pygui_init() -> None:
     dpg.create_context()
@@ -55,6 +66,8 @@ def pygui_init() -> None:
             with dpg.menu(label="Data"):
                 dpg.add_menu_item(label="Load", callback=load_menu_callback)
                 dpg.add_menu_item(label="Download", callback=download_menu_callback)
+            with dpg.menu(label="Replay"):
+                dpg.add_menu_item(label="Start", callback=replay_menu_callback)
 
         # データダウンロード用ウィンドウ
         with dpg.window(label="Data download", width=600, height=400, show=False, tag="window_download") as _window:
@@ -69,19 +82,26 @@ def pygui_init() -> None:
             dpg.add_text("", tag="text_log", label="", parent="window_log")
         
         # データロード用ウィンドウ
-        with dpg.window(label="Data load", width=600, height=400, show=False, tag="window_load") as _window:
+        with dpg.window(label="Data load", width=300, height=200, show=False, tag="window_load") as _window:
             dpg.add_text("Target symbol")
             dpg.add_input_text(tag="text_symbol2", label="", default_value="BTCUSDT", no_spaces=True, width = 200)
             dpg.add_text("Target date (YYYY-MM-DD)")
             dpg.add_input_text(tag="text_startdate2", label="", default_value="2023-04-01", no_spaces=True)
             dpg.add_text("")
             dpg.add_button(tag="button_load", label="Load data", callback=load_button_callback)
-
-            with dpg.plot(label="Ask Plot", tag="plot_ask", width=-1, height=-1):
+        
+        # データ再生用ウィンドウ
+        with dpg.texture_registry(show=True):
+            dpg.add_raw_texture(width=160, height=160, default_value=orderbook_heatmap_texture, format=dpg.mvFormat_Float_rgba, tag="orderbook_heatmap_texture")
+        with dpg.window(label="Data replay", width=640, height=480, show=False, tag="window_replay") as _window:
+            dpg.add_text("", tag="text_current_time")
+            with dpg.plot(label="Orderbook Plot", tag="plot_ask", width=160, height=160):
                 dpg.add_plot_legend()
                 dpg.add_plot_axis(dpg.mvXAxis, label="Volume", tag="ask_plot_xaxis")
                 dpg.add_plot_axis(dpg.mvYAxis, label="Price", tag="ask_plot_yaxis")
-                dpg.add_bar_series([1, 2, 3], [2, 4, 6], parent="ask_plot_yaxis", horizontal=True, tag="series_ask")
+                dpg.set_axis_limits("ask_plot_xaxis", -25, 25)
+                dpg.add_bar_series([], [], parent="ask_plot_yaxis", weight=0.1, horizontal=True, tag="series_ask")
+            dpg.add_image("orderbook_heatmap_texture", width=320, height=320)
 
     except Exception as e:
         print(e)

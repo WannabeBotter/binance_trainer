@@ -22,7 +22,7 @@ import gc
 from target_symbols import target_symbols
 from joblib_util import tqdm_joblib
 
-from pygui_util import pygui_log, pygui_label_id_map
+from pygui_util import pygui_log
 import dearpygui.dearpygui as dpg
 
 # BinanceのAPIエンドポイント
@@ -31,6 +31,10 @@ S_URL_V1 = "https://api.binance.com/sapi/v1"
 # APIキーとシークレットキー
 api_key = "s26OXPApbQ8NsQuMxWFprihgkHD9VX0LRuGDjWNPFW1QWcrCQ1TasvJGHKMF4PJE"
 secret_key = "crKGqWUFNezZSZd40jMQcY3XzzDNHt3dUK3P9q2Dl1nQ5NqTWsb5GwMKe6ydbsNb"
+
+# ロードしたデータを格納するデータフレーム
+df_orderbook_update = None
+df_trades = None
 
 # 署名用関数 Binanceのサンプルからコピーしたもの
 # https://github.com/binance/binance-public-data/tree/master/Futures_Order_Book_Download
@@ -203,10 +207,28 @@ def download_trades_orderbook(symbol: str = None, target_date: datetime.datetime
     _thread_orderbook = threading.Thread(target = download_orderbook_targz, args = (symbol, target_date))
     _thread_waiting = threading.Thread(target = download_completion, args = (_thread_trades, _thread_orderbook))
 
-    #with tqdm_joblib(total = len(symbols)):
-    #    r = Parallel(n_jobs = 4, timeout = 60*60*24)([delayed(download_orderbook_zip)(_symbol, _startdate, _enddate, _datadir) for _symbol in symbols])
-
     _thread_trades.start()
     _thread_orderbook.start()
     _thread_waiting.start()
 
+# データフレームをロードする関数
+def load_dataframes(symbol: str = None, target_date: datetime.datetime = None) -> None:
+    assert symbol is not None
+    assert target_date is not None
+
+    global df_orderbook_update, df_orderbook_snap, df_trades
+
+    _df_orderbook_update = pl.read_parquet(f"data/{symbol}_T_DEPTH_{target_date.strftime('%Y-%m-%d')}_depth_update.parquet").sort("timestamp")
+    _df_orderbook_snap = pl.read_parquet(f"data/{symbol}_T_DEPTH_{target_date.strftime('%Y-%m-%d')}_depth_snap.parquet").sort("timestamp")
+    df_orderbook_update = pl.concat([_df_orderbook_update, _df_orderbook_snap], how="vertical").sort(["timestamp", "update_type"])
+
+    df_trades = pl.read_parquet(f"data/{symbol}-trades-{target_date.strftime('%Y-%m-%d')}.parquet").sort("time")
+    
+    dpg.configure_item("button_load", enabled=True)
+    dpg.configure_item("window_load", show=False)
+
+# データフレームをロードするスレッドを起動する関数
+def load_dataframes_thread(symbol: str = None, target_date: datetime.datetime = None) -> None:
+    dpg.configure_item("button_load", enabled=False)
+    _thread = threading.Thread(target = load_dataframes, args = (symbol, target_date))
+    _thread.start()

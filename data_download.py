@@ -33,8 +33,7 @@ api_key = "s26OXPApbQ8NsQuMxWFprihgkHD9VX0LRuGDjWNPFW1QWcrCQ1TasvJGHKMF4PJE"
 secret_key = "crKGqWUFNezZSZd40jMQcY3XzzDNHt3dUK3P9q2Dl1nQ5NqTWsb5GwMKe6ydbsNb"
 
 # ロードしたデータを格納するデータフレーム
-df_orderbook_update = None
-df_trades = None
+df_events = None
 
 # 署名用関数 Binanceのサンプルからコピーしたもの
 # https://github.com/binance/binance-public-data/tree/master/Futures_Order_Book_Download
@@ -50,7 +49,7 @@ def sign(params={}):
     sig = {"signature": signature}
     return data, sig
 
-# Binance側が生成した.tar.gzをダウンロードしてPolarsデータフレームを作り、parquetとして保存する関数
+# Binance側が生成したオーダーブックの.tar.gzをダウンロードしてPolarsデータフレームを作り、parquetとして保存する関数
 @retry(stop_max_attempt_number = 5, wait_fixed = 1000)
 def download_orderbook_targz(symbol: str = None, startdate: datetime.datetime = None) -> None:
     assert symbol is not None
@@ -149,15 +148,15 @@ def download_orderbook_targz(symbol: str = None, startdate: datetime.datetime = 
 
 # 指定されたファイル名をもとに、.zipをダウンロードしてデータフレームを作り、pkl.gzとして保存する関数
 @retry(stop_max_attempt_number = 5, wait_fixed = 1000)
-def download_trades_zip(symbol: str = None, target_date: datetime.datetime = None) -> None:
-    assert symbol is not None
+def download_trades_zip(target_symbol: str = None, target_date: datetime.datetime = None) -> None:
+    assert target_symbol is not None
     assert target_date is not None
     
-    target_file_name = f"{symbol}-trades-{target_date.strftime('%Y-%m-%d')}.zip"
+    target_file_name = f"{target_symbol}-trades-{target_date.strftime('%Y-%m-%d')}.zip"
 
     _stem = Path(target_file_name).stem
     
-    _url = f'https://data.binance.vision/data/futures/um/daily/trades/{symbol}/{target_file_name}'
+    _url = f'https://data.binance.vision/data/futures/um/daily/trades/{target_symbol}/{target_file_name}'
     pygui_log(f"HTTP GET : {_url}")
     _r = requests.get(_url)
     pygui_log(f"HTTP GET status : {_r.status_code}.")
@@ -184,13 +183,23 @@ def download_trades_zip(symbol: str = None, target_date: datetime.datetime = Non
                           skip_rows = _header,
                           new_columns = ["id", "price", "qty", "quote_qty", "time", "is_buyer_maker"],
                           dtypes = {"id": pl.Int64, "price": pl.Float64, "qty": pl.Float64, "quote_qty": pl.Float64, "time": pl.Int64, "is_buyer_maker": pl.Boolean})
+        
+        # カラム名などをOrderbookのデータ形式に揃える
+        _df = _df.rename({"time": "timestamp", "id": "first_update_id"})
+        _df = _df.with_columns(pl.col("first_update_id").alias("last_update_id"),
+                               pl.when(pl.col("is_buyer_maker") == True).then("a").otherwise("b").alias("side"),
+                               (pl.col("first_update_id") - 1).alias("pu"),
+                               pl.lit(target_symbol).alias("symbol"),
+                               pl.lit("trade").alias("update_type"))
+        _df = _df.select(["symbol", "timestamp", "first_update_id", "last_update_id", "side", "update_type", "price", "qty", "pu"])
     except Exception as e:
         print(f"polars.read_csv({_url}) returned Exception {e}.")
         raise e
-        
+    
+    # Parquetファイルを書き込む
     if not os.path.exists(f"./data/"):
         os.makedirs(f"./data/")
-    _df.write_parquet(f"./data/{_stem}.parquet")
+    _df.write_parquet(f"./data/{target_symbol}_TRADES_{target_date.strftime('%Y-%m-%d')}.parquet")
     return
 
 def download_completion(thread_trades, thread_orderbook) -> None:
@@ -198,32 +207,32 @@ def download_completion(thread_trades, thread_orderbook) -> None:
     thread_orderbook.join()
     dpg.configure_item("button_download", enabled=True)
 
-def download_trades_orderbook(symbol: str = None, target_date: datetime.datetime = None) -> None:
-    assert symbol is not None
+def download_trades_orderbook(target_symbol: str = None, target_date: datetime.datetime = None) -> None:
+    assert target_symbol is not None
     assert target_date is not None
     
-    pygui_log(f"Starting a download thread for {symbol} orderbook data on {target_date}.")
-    _thread_trades = threading.Thread(target = download_trades_zip, args = (symbol, target_date))
-    _thread_orderbook = threading.Thread(target = download_orderbook_targz, args = (symbol, target_date))
+    pygui_log(f"Starting a download thread for {target_symbol} orderbook data on {target_date}.")
+    _thread_trades = threading.Thread(target = download_trades_zip, args = (target_symbol, target_date))
+    _thread_orderbook = threading.Thread(target = download_orderbook_targz, args = (target_symbol, target_date))
     _thread_waiting = threading.Thread(target = download_completion, args = (_thread_trades, _thread_orderbook))
-
+    
     _thread_trades.start()
     _thread_orderbook.start()
     _thread_waiting.start()
 
 # データフレームをロードする関数
-def load_dataframes(symbol: str = None, target_date: datetime.datetime = None) -> None:
-    assert symbol is not None
+def load_dataframes(target_symbol: str = None, target_date: datetime.datetime = None) -> None:
+    assert target_symbol is not None
     assert target_date is not None
 
-    global df_orderbook_update, df_orderbook_snap, df_trades
-
-    _df_orderbook_update = pl.read_parquet(f"data/{symbol}_T_DEPTH_{target_date.strftime('%Y-%m-%d')}_depth_update.parquet").sort("timestamp")
-    _df_orderbook_snap = pl.read_parquet(f"data/{symbol}_T_DEPTH_{target_date.strftime('%Y-%m-%d')}_depth_snap.parquet").sort("timestamp")
-    df_orderbook_update = pl.concat([_df_orderbook_update, _df_orderbook_snap], how="vertical").sort(["timestamp", "update_type"])
-
-    df_trades = pl.read_parquet(f"data/{symbol}-trades-{target_date.strftime('%Y-%m-%d')}.parquet").sort("time")
+    global df_events
     
+    _df_orderbook_update = pl.read_parquet(f"data/{target_symbol}_T_DEPTH_{target_date.strftime('%Y-%m-%d')}_depth_update.parquet")
+    _df_orderbook_snap = pl.read_parquet(f"data/{target_symbol}_T_DEPTH_{target_date.strftime('%Y-%m-%d')}_depth_snap.parquet")
+    _df_trades = pl.read_parquet(f"data/{target_symbol}_TRADES_{target_date.strftime('%Y-%m-%d')}.parquet")
+    
+    df_events = pl.concat([_df_orderbook_update, _df_orderbook_snap, _df_trades], how="vertical").sort(["timestamp", "update_type"])
+
     dpg.configure_item("button_load", enabled=True)
     dpg.configure_item("window_load", show=False)
 

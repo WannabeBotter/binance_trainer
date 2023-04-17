@@ -2,6 +2,11 @@ from datetime import datetime
 import numpy as np
 import dearpygui.dearpygui as dpg
 
+# 定数
+TEXTURE_WIDTH = 256
+TEXTURE_HEIGHT = TEXTURE_WIDTH
+TEXTURE_CHANNELS = 3
+
 # ログウィンドウにログ出力をする関数
 def pygui_log(text: str) -> None:
     _log_text = dpg.get_value("text_log")
@@ -12,10 +17,10 @@ def pygui_log(text: str) -> None:
     dpg.set_y_scroll("window_log", _y_scroll_max)
 
 from data_download import download_trades_orderbook, load_dataframes_thread
-from data_replay import run_replay_thread, get_mid_price
+from data_replay import run_replay_thread
 
 # Orderbookのヒートマップ表示用のテクスチャ
-orderbook_heatmap_texture = np.zeros((120, 120, 3), dtype=np.float32)
+orderbook_heatmap_texture = np.zeros((TEXTURE_WIDTH, TEXTURE_HEIGHT, TEXTURE_CHANNELS), dtype=np.float32)
 
 # ダウンロードメニューを押したときのコールバック関数
 def download_menu_callback(sender, app_data, user_data):
@@ -73,7 +78,7 @@ def pygui_init() -> None:
                 dpg.add_menu_item(label="Debug", callback=debug_log_menu_callback)
 
         # データダウンロード用ウィンドウ
-        with dpg.window(label="Data download", width=600, height=400, show=False, tag="window_download") as _window:
+        with dpg.window(label="Data download", show=False, tag="window_download") as _window:
             dpg.add_text("Target symbol")
             dpg.add_input_text(tag="text_symbol", label="", default_value="BTCUSDT", no_spaces=True, width = 200)
             dpg.add_text("Target date (YYYY-MM-DD)")
@@ -92,7 +97,7 @@ def pygui_init() -> None:
         
         # データ再生用ウィンドウ
         with dpg.texture_registry(show=False, tag="texture_registry"):
-            dpg.add_raw_texture(width=120, height=120, default_value=orderbook_heatmap_texture, format=dpg.mvFormat_Float_rgb, tag="orderbook_heatmap_texture")
+            dpg.add_raw_texture(width=TEXTURE_WIDTH, height=TEXTURE_HEIGHT, default_value=orderbook_heatmap_texture, format=dpg.mvFormat_Float_rgb, tag="orderbook_heatmap_texture")
         with dpg.window(label="Data replay", width=640, height=480, show=False, tag="window_replay") as _window:
             dpg.add_text("", tag="text_current_time")
             dpg.add_text("", tag="text_mid_price")
@@ -102,7 +107,7 @@ def pygui_init() -> None:
             #    dpg.add_plot_axis(dpg.mvYAxis, label="Price", tag="ask_plot_yaxis")
             #    dpg.set_axis_limits("ask_plot_xaxis", -25, 25)
             #    dpg.add_bar_series([], [], parent="ask_plot_yaxis", weight=0.1, horizontal=True, tag="series_ask")
-            dpg.add_image("orderbook_heatmap_texture", width=360, height=360, uv_min=(0, 0), uv_max=(1.0, 1.0), border_color=(78, 78, 78))
+            dpg.add_image("orderbook_heatmap_texture", width=TEXTURE_WIDTH * 2, height=TEXTURE_HEIGHT * 2, uv_min=(0, 0), uv_max=(1.0, 1.0), border_color=(78, 78, 78))
 
         # デバッグ用ウィンドウ
         with dpg.window(label="Debug log", width=600, height=200, show=False, tag="window_debug") as _window:

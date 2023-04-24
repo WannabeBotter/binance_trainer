@@ -12,18 +12,19 @@ tall_orderbook_heatmap_texture = np.zeros((TEXTURE_HEIGHT * 2, TEXTURE_WIDTH, TE
 
 # 1ピクセルあたりの値幅
 PRICE_PER_PIXEL = 0.1
+MILLISECOND_PER_PIXEL = 1
 
 # 板情報の最も明るい輝点のqty
-ORDERBOOK_MAX_QTY = 5
+#ORDERBOOK_MAX_QTY = 4 # USDT PERP用 4BTC
+ORDERBOOK_MAX_QTY = 1000 # USD PERP用 1000 Contract
 
 # オーダー情報の最も明るい輝点のqty
-TRADES_MAX_QTY = 0.1
+#TRADES_MAX_QTY = 0.1 # USDT PERP用 4BTC
+TRADES_MAX_QTY = 30 # USD PERP用 10 Contract
+
 
 def run_replay() -> None:
     global tall_orderbook_heatmap_texture, mid_price, prev_mid_price
-    _mid_price = np.inf
-    _prev_mid_price = np.inf
-
     _df_events = data_download.df_events
     
     _df_emptybook = pl.DataFrame(
@@ -36,11 +37,17 @@ def run_replay() -> None:
     _dict_orderbook_ask = {} # 売り板の値幅
     _dict_trades = {} # トレード出来高
     _idx = 0
+    _mid_price = np.inf
+    _prev_mid_price = np.inf
+    _timestamp = -np.inf
+    _prev_timestamp = -np.inf
 
     while True:
         # _df_eventsの_idx行目と、timestampが同じ行を全て取得する
         _idx_start = _idx
+        _prev_timestamp = _timestamp
         _timestamp = _df_events[_idx_start, "timestamp"]
+
         _date = datetime.datetime.fromtimestamp(_timestamp / 1000.0)
         _date_str = _date.strftime('%Y-%m-%d %H:%M:%S.%f')
 
@@ -74,9 +81,9 @@ def run_replay() -> None:
             _idx = _idx + 1
         
         # 次の行と0.1秒単位の時間の繰り上がりがない場合は描画処理をせず次の行へ進む (timestampはミリ秒単位)
-        if _idx < _df_events.shape[0] - 1:
-            if _timestamp // 100 == _df_events[_idx, "timestamp"] // 100:
-                continue
+        #if _idx < _df_events.shape[0] - 1:
+        #    if _timestamp // 1 == _df_events[_idx, "timestamp"] // 1:
+        #        continue
 
         # 板情報がbid/ask両方分ない場合は、描画処理を行わない
         if len(_dict_orderbook_bid) == 0 or len(_dict_orderbook_ask) == 0:
@@ -137,8 +144,11 @@ def run_replay() -> None:
 
         # テクスチャの更新
 
-        # 時間が経過したので、列方向にシフト
-        tall_orderbook_heatmap_texture = np.roll(tall_orderbook_heatmap_texture, shift=-1, axis=1)
+        # 時間経過があった場合は、テクスチャを左にずらす
+        if _prev_timestamp != -np.inf and _prev_timestamp != _timestamp:
+            tall_orderbook_heatmap_texture = np.roll(tall_orderbook_heatmap_texture, shift=-1, axis=1)
+            tall_orderbook_heatmap_texture[:, -1:, :] = 0
+
 
         # _mid_priceの変化1ドルごとに行方向にシフト
         _shift = int(_mid_price) - int(_prev_mid_price)
@@ -162,12 +172,12 @@ def run_replay() -> None:
 
         # テキストの表示のアップデート
         dpg.set_value("text_current_time", f"{_date_str}")
-        dpg.set_value("text_mid_price", f"Mid price : {_mid_price:.2f}")
+        dpg.set_value("text_mid_price", f"Mid price : {_mid_price:.2f}, Best bid : {_best_bid:.2f}, Best ask : {_best_ask:.2f}")
 
         # 描画が終わったのでトレード出来高情報をクリア
         _dict_trades = {}
 
-        time.sleep(0.000001)
+        time.sleep(0.01)
 
         # リプレイが終了したらループを抜ける
         if _idx >= _df_events.shape[0]:

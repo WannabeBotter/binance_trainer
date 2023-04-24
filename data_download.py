@@ -29,8 +29,9 @@ import dearpygui.dearpygui as dpg
 S_URL_V1 = "https://api.binance.com/sapi/v1"
 
 # APIキーとシークレットキー
-api_key = "s26OXPApbQ8NsQuMxWFprihgkHD9VX0LRuGDjWNPFW1QWcrCQ1TasvJGHKMF4PJE"
-secret_key = "crKGqWUFNezZSZd40jMQcY3XzzDNHt3dUK3P9q2Dl1nQ5NqTWsb5GwMKe6ydbsNb"
+api_key = os.environ.get("BINANCE_APIKEY")
+secret_key = os.environ.get("BINANCE_APISECRET")
+print(secret_key)
 
 # ロードしたデータを格納するデータフレーム
 df_events = None
@@ -38,6 +39,8 @@ df_events = None
 # 署名用関数 Binanceのサンプルからコピーしたもの
 # https://github.com/binance/binance-public-data/tree/master/Futures_Order_Book_Download
 def sign(params={}):
+    global secret_key
+
     data = params.copy()
     ts = str(int(1000 * time.time()))
     data.update({"timestamp": ts})
@@ -101,7 +104,8 @@ def download_orderbook_targz(symbol: str = None, startdate: datetime.datetime = 
             time.sleep(10)
             continue
         else:
-            pygui_log("Received a download link.")
+            pygui_log(f"Received a download link. {_r.json()['link']}")
+            print(f"Received a download link. {_r.json()['link']}")
             break
     
     _url = _r.json()["link"]
@@ -155,8 +159,12 @@ def download_trades_zip(target_symbol: str = None, target_date: datetime.datetim
     target_file_name = f"{target_symbol}-trades-{target_date.strftime('%Y-%m-%d')}.zip"
 
     _stem = Path(target_file_name).stem
-    
-    _url = f'https://data.binance.vision/data/futures/um/daily/trades/{target_symbol}/{target_file_name}'
+
+    if "USD_" in target_symbol:
+        _url = f'https://data.binance.vision/data/futures/cm/daily/trades/{target_symbol}/{target_file_name}'
+    else:
+        _url = f'https://data.binance.vision/data/futures/um/daily/trades/{target_symbol}/{target_file_name}'
+
     pygui_log(f"HTTP GET : {_url}")
     _r = requests.get(_url)
     pygui_log(f"HTTP GET status : {_r.status_code}.")
@@ -227,9 +235,9 @@ def load_dataframes(target_symbol: str = None, target_date: datetime.datetime = 
 
     global df_events
     
-    _df_orderbook_update = pl.read_parquet(f"data/{target_symbol}_T_DEPTH_{target_date.strftime('%Y-%m-%d')}_depth_update.parquet")
-    _df_orderbook_snap = pl.read_parquet(f"data/{target_symbol}_T_DEPTH_{target_date.strftime('%Y-%m-%d')}_depth_snap.parquet")
-    _df_trades = pl.read_parquet(f"data/{target_symbol}_TRADES_{target_date.strftime('%Y-%m-%d')}.parquet")
+    _df_orderbook_update = pl.read_parquet(f"data/{target_symbol}_T_DEPTH_{target_date.strftime('%Y-%m-%d')}_depth_update.parquet").with_columns(pl.col("qty").cast(pl.Float64).alias("qty"))
+    _df_orderbook_snap = pl.read_parquet(f"data/{target_symbol}_T_DEPTH_{target_date.strftime('%Y-%m-%d')}_depth_snap.parquet").with_columns(pl.col("qty").cast(pl.Float64).alias("qty"))
+    _df_trades = pl.read_parquet(f"data/{target_symbol}_TRADES_{target_date.strftime('%Y-%m-%d')}.parquet").with_columns(pl.col("qty").cast(pl.Float64).alias("qty"))
     
     df_events = pl.concat([_df_orderbook_update, _df_orderbook_snap, _df_trades], how="vertical").sort(["timestamp", "update_type"])
 

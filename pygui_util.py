@@ -107,7 +107,20 @@ def pygui_init() -> None:
             #    dpg.add_plot_axis(dpg.mvYAxis, label="Price", tag="ask_plot_yaxis")
             #    dpg.set_axis_limits("ask_plot_xaxis", -25, 25)
             #    dpg.add_bar_series([], [], parent="ask_plot_yaxis", weight=0.1, horizontal=True, tag="series_ask")
-            dpg.add_image("orderbook_heatmap_texture", width=TEXTURE_WIDTH * 2, height=TEXTURE_HEIGHT * 2, uv_min=(0, 0), uv_max=(1.0, 1.0), border_color=(78, 78, 78))
+            with dpg.drawlist(width=640, height=480):
+                with dpg.draw_layer(tag="layer_image"):
+                    dpg.draw_image("orderbook_heatmap_texture", (0, 0), (TEXTURE_WIDTH * 2, TEXTURE_HEIGHT * 2), uv_min=(0, 0), uv_max=(1.0, 1.0))
+                with dpg.draw_layer(tag="layer_grid"):
+                    dpg.draw_line((0, TEXTURE_WIDTH), (TEXTURE_WIDTH * 2, TEXTURE_WIDTH), color=(255, 255, 255, 64), thickness=1)
+                    dpg.draw_line((0, TEXTURE_WIDTH - 40), (TEXTURE_WIDTH * 2, TEXTURE_WIDTH - 40), color=(255, 255, 255, 64), thickness=1)
+                    dpg.draw_line((0, TEXTURE_WIDTH + 40), (TEXTURE_WIDTH * 2, TEXTURE_WIDTH + 40), color=(255, 255, 255, 64), thickness=1)
+                    dpg.draw_line((0, TEXTURE_WIDTH - 80), (TEXTURE_WIDTH * 2, TEXTURE_WIDTH - 80), color=(255, 255, 255, 64), thickness=1)
+                    dpg.draw_line((0, TEXTURE_WIDTH + 80), (TEXTURE_WIDTH * 2, TEXTURE_WIDTH + 80), color=(255, 255, 255, 64), thickness=1)
+                    dpg.draw_line((0, TEXTURE_WIDTH - 120), (TEXTURE_WIDTH * 2, TEXTURE_WIDTH - 120), color=(255, 255, 255, 64), thickness=1)
+                    dpg.draw_line((0, TEXTURE_WIDTH + 120), (TEXTURE_WIDTH * 2, TEXTURE_WIDTH + 120), color=(255, 255, 255, 64), thickness=1)
+                    dpg.draw_line((0, TEXTURE_WIDTH - 160), (TEXTURE_WIDTH * 2, TEXTURE_WIDTH - 160), color=(255, 255, 255, 64), thickness=1)
+                    dpg.draw_line((0, TEXTURE_WIDTH + 160), (TEXTURE_WIDTH * 2, TEXTURE_WIDTH + 160), color=(255, 255, 255, 64), thickness=1)
+            #dpg.add_image("orderbook_heatmap_texture", width=TEXTURE_WIDTH * 2, height=TEXTURE_HEIGHT * 2, uv_min=(0, 0), uv_max=(1.0, 1.0), border_color=(78, 78, 78), pos=(32, 32 + 16))
 
         # デバッグ用ウィンドウ
         with dpg.window(label="Debug log", width=600, height=200, show=False, tag="window_debug") as _window:
